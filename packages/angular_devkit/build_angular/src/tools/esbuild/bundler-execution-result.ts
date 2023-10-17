@@ -6,11 +6,15 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import { OutputFile } from 'esbuild';
 import type { ChangedFiles } from '../../tools/esbuild/watcher';
-import type { SourceFileCache } from './angular/compiler-plugin';
-import type { BundlerContext } from './bundler-context';
+import type { SourceFileCache } from './angular/source-file-cache';
+import type { BuildOutputFile, BuildOutputFileType, BundlerContext } from './bundler-context';
 import { createOutputFileFromText } from './utils';
+
+export interface BuildOutputAsset {
+  source: string;
+  destination: string;
+}
 
 export interface RebuildState {
   rebuildContexts: BundlerContext[];
@@ -22,16 +26,20 @@ export interface RebuildState {
  * Represents the result of a single builder execute call.
  */
 export class ExecutionResult {
-  readonly outputFiles: OutputFile[] = [];
-  readonly assetFiles: { source: string; destination: string }[] = [];
+  outputFiles: BuildOutputFile[] = [];
+  assetFiles: BuildOutputAsset[] = [];
 
   constructor(
     private rebuildContexts: BundlerContext[],
     private codeBundleCache?: SourceFileCache,
   ) {}
 
-  addOutputFile(path: string, content: string): void {
-    this.outputFiles.push(createOutputFileFromText(path, content));
+  addOutputFile(path: string, content: string, type: BuildOutputFileType): void {
+    this.outputFiles.push(createOutputFileFromText(path, content, type));
+  }
+
+  addAssets(assets: BuildOutputAsset[]): void {
+    this.assetFiles.push(...assets);
   }
 
   get output() {

@@ -14,57 +14,27 @@ import type {
   Plugin,
   PluginBuild,
 } from 'esbuild';
+import assert from 'node:assert';
 import { realpath } from 'node:fs/promises';
-import { platform } from 'node:os';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 import { maxWorkers } from '../../../utils/environment-options';
 import { JavaScriptTransformer } from '../javascript-transformer';
-import { LoadResultCache, MemoryLoadResultCache } from '../load-result-cache';
+import { LoadResultCache } from '../load-result-cache';
 import {
   logCumulativeDurations,
   profileAsync,
   profileSync,
   resetCumulativeDurations,
 } from '../profiling';
-import { BundleStylesheetOptions, bundleComponentStylesheet } from '../stylesheets/bundle-options';
+import { BundleStylesheetOptions } from '../stylesheets/bundle-options';
 import { AngularHostOptions } from './angular-host';
 import { AngularCompilation, AotCompilation, JitCompilation, NoopCompilation } from './compilation';
+import { SharedTSCompilationState, getSharedCompilationState } from './compilation-state';
+import { ComponentStylesheetBundler } from './component-stylesheets';
 import { setupJitPluginCallbacks } from './jit-plugin-callbacks';
-
-const USING_WINDOWS = platform() === 'win32';
-const WINDOWS_SEP_REGEXP = new RegExp(`\\${path.win32.sep}`, 'g');
-
-export class SourceFileCache extends Map<string, ts.SourceFile> {
-  readonly modifiedFiles = new Set<string>();
-  readonly babelFileCache = new Map<string, Uint8Array>();
-  readonly typeScriptFileCache = new Map<string, string | Uint8Array>();
-  readonly loadResultCache = new MemoryLoadResultCache();
-
-  referencedFiles?: readonly string[];
-
-  constructor(readonly persistentCachePath?: string) {
-    super();
-  }
-
-  invalidate(files: Iterable<string>): void {
-    this.modifiedFiles.clear();
-    for (let file of files) {
-      this.babelFileCache.delete(file);
-      this.typeScriptFileCache.delete(pathToFileURL(file).href);
-      this.loadResultCache.invalidate(file);
-
-      // Normalize separators to allow matching TypeScript Host paths
-      if (USING_WINDOWS) {
-        file = file.replace(WINDOWS_SEP_REGEXP, path.posix.sep);
-      }
-
-      this.delete(file);
-      this.modifiedFiles.add(file);
-    }
-  }
-}
+import { SourceFileCache } from './source-file-cache';
 
 export interface CompilerPluginOptions {
   sourcemap: boolean;
@@ -79,29 +49,18 @@ export interface CompilerPluginOptions {
   loadResultCache?: LoadResultCache;
 }
 
-// TODO: find a better way to unblock TS compilation of server bundles.
-let TS_COMPILATION_READY: Promise<void> | undefined;
-
 // eslint-disable-next-line max-lines-per-function
 export function createCompilerPlugin(
   pluginOptions: CompilerPluginOptions,
   styleOptions: BundleStylesheetOptions & { inlineStyleLanguage: string },
 ): Plugin {
-  let resolveCompilationReady: (() => void) | undefined;
-
-  if (!pluginOptions.noopTypeScriptCompilation) {
-    TS_COMPILATION_READY = new Promise<void>((resolve) => {
-      resolveCompilationReady = resolve;
-    });
-  }
-
   return {
     name: 'angular-compiler',
     // eslint-disable-next-line max-lines-per-function
     async setup(build: PluginBuild): Promise<void> {
       let setupWarnings: PartialMessage[] | undefined = [];
-
       const preserveSymlinks = build.initialOptions.preserveSymlinks;
+
       let tsconfigPath = pluginOptions.tsconfig;
       if (!preserveSymlinks) {
         // Use the real path of the tsconfig if not preserving symlinks.
@@ -114,22 +73,9 @@ export function createCompilerPlugin(
       // Initialize a worker pool for JavaScript transformations
       const javascriptTransformer = new JavaScriptTransformer(pluginOptions, maxWorkers);
 
-      // Setup defines based on the values provided by the Angular compiler-cli
-      const { GLOBAL_DEFS_FOR_TERSER_WITH_AOT } = await AngularCompilation.loadCompilerCli();
+      // Setup defines based on the values used by the Angular compiler-cli
       build.initialOptions.define ??= {};
-      for (const [key, value] of Object.entries(GLOBAL_DEFS_FOR_TERSER_WITH_AOT)) {
-        if (key in build.initialOptions.define) {
-          // Skip keys that have been manually provided
-          continue;
-        }
-        if (key === 'ngDevMode') {
-          // ngDevMode is already set based on the builder's script optimization option
-          continue;
-        }
-        // esbuild requires values to be a string (actual strings need to be quoted).
-        // In this case, all provided values are booleans.
-        build.initialOptions.define[key] = value.toString();
-      }
+      build.initialOptions.define['ngI18nClosureMode'] ??= 'false';
 
       // The in-memory cache of TypeScript file outputs will be used during the build in `onLoad` callbacks for TS files.
       // A string value indicates direct TS/NG output and a Uint8Array indicates fully transformed code.
@@ -138,8 +84,8 @@ export function createCompilerPlugin(
         new Map<string, string | Uint8Array>();
 
       // The stylesheet resources from component stylesheets that will be added to the build results output files
-      let stylesheetResourceFiles: OutputFile[] = [];
-      let stylesheetMetafiles: Metafile[];
+      let additionalOutputFiles: OutputFile[] = [];
+      let additionalMetafiles: Metafile[];
 
       // Create new reusable compilation for the appropriate mode based on the `jit` plugin option
       const compilation: AngularCompilation = pluginOptions.noopTypeScriptCompilation
@@ -151,7 +97,19 @@ export function createCompilerPlugin(
       // Determines if TypeScript should process JavaScript files based on tsconfig `allowJs` option
       let shouldTsIgnoreJs = true;
 
+      // Track incremental component stylesheet builds
+      const stylesheetBundler = new ComponentStylesheetBundler(
+        styleOptions,
+        pluginOptions.loadResultCache,
+      );
+      let sharedTSCompilationState: SharedTSCompilationState | undefined;
+
       build.onStart(async () => {
+        sharedTSCompilationState = getSharedCompilationState();
+        if (!(compilation instanceof NoopCompilation)) {
+          sharedTSCompilationState.markAsInProgress();
+        }
+
         const result: OnStartResult = {
           warnings: setupWarnings,
         };
@@ -159,9 +117,9 @@ export function createCompilerPlugin(
         // Reset debug performance tracking
         resetCumulativeDurations();
 
-        // Reset stylesheet resource output files
-        stylesheetResourceFiles = [];
-        stylesheetMetafiles = [];
+        // Reset additional output files
+        additionalOutputFiles = [];
+        additionalMetafiles = [];
 
         // Create Angular compiler host options
         const hostOptions: AngularHostOptions = {
@@ -169,29 +127,74 @@ export function createCompilerPlugin(
           modifiedFiles: pluginOptions.sourceFileCache?.modifiedFiles,
           sourceFileCache: pluginOptions.sourceFileCache,
           async transformStylesheet(data, containingFile, stylesheetFile) {
-            // Stylesheet file only exists for external stylesheets
-            const filename = stylesheetFile ?? containingFile;
+            let stylesheetResult;
 
-            const stylesheetResult = await bundleComponentStylesheet(
-              styleOptions.inlineStyleLanguage,
-              data,
-              filename,
-              !stylesheetFile,
-              styleOptions,
-              pluginOptions.loadResultCache,
-            );
+            // Stylesheet file only exists for external stylesheets
+            if (stylesheetFile) {
+              stylesheetResult = await stylesheetBundler.bundleFile(stylesheetFile);
+            } else {
+              stylesheetResult = await stylesheetBundler.bundleInline(
+                data,
+                containingFile,
+                styleOptions.inlineStyleLanguage,
+              );
+            }
 
             const { contents, resourceFiles, errors, warnings } = stylesheetResult;
             if (errors) {
               (result.errors ??= []).push(...errors);
             }
             (result.warnings ??= []).push(...warnings);
-            stylesheetResourceFiles.push(...resourceFiles);
+            additionalOutputFiles.push(...resourceFiles);
             if (stylesheetResult.metafile) {
-              stylesheetMetafiles.push(stylesheetResult.metafile);
+              additionalMetafiles.push(stylesheetResult.metafile);
             }
 
             return contents;
+          },
+          processWebWorker(workerFile, containingFile) {
+            const fullWorkerPath = path.join(path.dirname(containingFile), workerFile);
+            // The synchronous API must be used due to the TypeScript compilation currently being
+            // fully synchronous and this process callback being called from within a TypeScript
+            // transformer.
+            const workerResult = build.esbuild.buildSync({
+              platform: 'browser',
+              write: false,
+              bundle: true,
+              metafile: true,
+              format: 'esm',
+              mainFields: ['es2020', 'es2015', 'browser', 'module', 'main'],
+              sourcemap: pluginOptions.sourcemap,
+              entryNames: 'worker-[hash]',
+              entryPoints: [fullWorkerPath],
+              absWorkingDir: build.initialOptions.absWorkingDir,
+              outdir: build.initialOptions.outdir,
+              minifyIdentifiers: build.initialOptions.minifyIdentifiers,
+              minifySyntax: build.initialOptions.minifySyntax,
+              minifyWhitespace: build.initialOptions.minifyWhitespace,
+              target: build.initialOptions.target,
+            });
+
+            (result.warnings ??= []).push(...workerResult.warnings);
+            additionalOutputFiles.push(...workerResult.outputFiles);
+            if (workerResult.metafile) {
+              additionalMetafiles.push(workerResult.metafile);
+            }
+
+            if (workerResult.errors.length > 0) {
+              (result.errors ??= []).push(...workerResult.errors);
+
+              // Return the original path if the build failed
+              return workerFile;
+            }
+
+            // Return bundled worker file entry name to be used in the built output
+            const workerCodeFile = workerResult.outputFiles.find((file) =>
+              file.path.endsWith('.js'),
+            );
+            assert(workerCodeFile, 'Web Worker bundled code file should always be present.');
+
+            return path.relative(build.initialOptions.outdir ?? '', workerCodeFile.path);
           },
         };
 
@@ -252,7 +255,7 @@ export function createCompilerPlugin(
         shouldTsIgnoreJs = !allowJs;
 
         if (compilation instanceof NoopCompilation) {
-          await TS_COMPILATION_READY;
+          await sharedTSCompilationState.waitUntilReady;
 
           return result;
         }
@@ -280,8 +283,7 @@ export function createCompilerPlugin(
         // Reset the setup warnings so that they are only shown during the first build.
         setupWarnings = undefined;
 
-        // TODO: find a better way to unblock TS compilation of server bundles.
-        resolveCompilationReady?.();
+        sharedTSCompilationState.markAsReady();
 
         return result;
       });
@@ -358,27 +360,32 @@ export function createCompilerPlugin(
       if (pluginOptions.jit) {
         setupJitPluginCallbacks(
           build,
-          styleOptions,
-          stylesheetResourceFiles,
-          pluginOptions.loadResultCache,
+          stylesheetBundler,
+          additionalOutputFiles,
+          styleOptions.inlineStyleLanguage,
         );
       }
 
       build.onEnd((result) => {
-        // Add any component stylesheet resource files to the output files
-        if (stylesheetResourceFiles.length) {
-          result.outputFiles?.push(...stylesheetResourceFiles);
+        // Add any additional output files to the main output files
+        if (additionalOutputFiles.length) {
+          result.outputFiles?.push(...additionalOutputFiles);
         }
 
-        // Combine component stylesheet metafiles with main metafile
-        if (result.metafile && stylesheetMetafiles.length) {
-          for (const metafile of stylesheetMetafiles) {
+        // Combine additional metafiles with main metafile
+        if (result.metafile && additionalMetafiles.length) {
+          for (const metafile of additionalMetafiles) {
             result.metafile.inputs = { ...result.metafile.inputs, ...metafile.inputs };
             result.metafile.outputs = { ...result.metafile.outputs, ...metafile.outputs };
           }
         }
 
         logCumulativeDurations();
+      });
+
+      build.onDispose(() => {
+        sharedTSCompilationState?.dispose();
+        void stylesheetBundler.dispose();
       });
     },
   };

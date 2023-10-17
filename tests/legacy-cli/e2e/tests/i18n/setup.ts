@@ -10,7 +10,7 @@ import { AddressInfo } from 'net';
 
 // Configurations for each locale.
 const translationFile = 'src/locale/messages.xlf';
-export const baseDir = 'dist/test-project';
+export const baseDir = 'dist/test-project/browser';
 export const langTranslations = [
   {
     lang: 'en-US',
@@ -101,8 +101,12 @@ export async function setupI18nConfig() {
     'src/app/app.component.ts',
     `
     import { Component, Inject, LOCALE_ID } from '@angular/core';
+    import { DatePipe } from '@angular/common';
+
     @Component({
       selector: 'app-root',
+      imports: [DatePipe],
+      standalone: true,
       templateUrl: './app.component.html'
     })
     export class AppComponent {
@@ -214,12 +218,16 @@ export async function setupI18nConfig() {
 
     // Always error on missing translations.
     appArchitect['build'].options.optimization = true;
-    appArchitect['build'].options.buildOptimizer = true;
     appArchitect['build'].options.aot = true;
     appArchitect['build'].options.i18nMissingTranslation = 'error';
-    appArchitect['build'].options.vendorChunk = true;
     appArchitect['build'].options.sourceMap = true;
     appArchitect['build'].options.outputHashing = 'none';
+
+    const useWebpackBuilder = !getGlobalVariable('argv')['esbuild'];
+    if (useWebpackBuilder) {
+      appArchitect['build'].options.buildOptimizer = true;
+      appArchitect['build'].options.vendorChunk = true;
+    }
 
     // Enable localization for all locales
     appArchitect['build'].options.localize = true;

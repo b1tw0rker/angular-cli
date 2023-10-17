@@ -8,14 +8,18 @@
 
 import type { Config, Filesystem } from '@angular/service-worker/config';
 import * as crypto from 'crypto';
-import type { OutputFile } from 'esbuild';
 import { existsSync, constants as fsConstants, promises as fsPromises } from 'node:fs';
 import * as path from 'path';
+import { BuildOutputFile, BuildOutputFileType } from '../tools/esbuild/bundler-context';
+import { BuildOutputAsset } from '../tools/esbuild/bundler-execution-result';
 import { assertIsError } from './error';
 import { loadEsmModule } from './load-esm';
 
 class CliFilesystem implements Filesystem {
-  constructor(private fs: typeof fsPromises, private base: string) {}
+  constructor(
+    private fs: typeof fsPromises,
+    private base: string,
+  ) {}
 
   list(dir: string): Promise<string[]> {
     return this._recursiveList(this._resolve(dir), []);
@@ -65,9 +69,14 @@ class CliFilesystem implements Filesystem {
 class ResultFilesystem implements Filesystem {
   private readonly fileReaders = new Map<string, () => Promise<Uint8Array>>();
 
-  constructor(outputFiles: OutputFile[], assetFiles: { source: string; destination: string }[]) {
+  constructor(
+    outputFiles: BuildOutputFile[],
+    assetFiles: { source: string; destination: string }[],
+  ) {
     for (const file of outputFiles) {
-      this.fileReaders.set('/' + file.path.replace(/\\/g, '/'), async () => file.contents);
+      if (file.type === BuildOutputFileType.Media || file.type === BuildOutputFileType.Browser) {
+        this.fileReaders.set('/' + file.path.replace(/\\/g, '/'), async () => file.contents);
+      }
     }
     for (const file of assetFiles) {
       this.fileReaders.set('/' + file.destination.replace(/\\/g, '/'), () =>
@@ -171,9 +180,9 @@ export async function augmentAppWithServiceWorkerEsbuild(
   workspaceRoot: string,
   configPath: string,
   baseHref: string,
-  outputFiles: OutputFile[],
-  assetFiles: { source: string; destination: string }[],
-): Promise<{ manifest: string; assetFiles: { source: string; destination: string }[] }> {
+  outputFiles: BuildOutputFile[],
+  assetFiles: BuildOutputAsset[],
+): Promise<{ manifest: string; assetFiles: BuildOutputAsset[] }> {
   // Read the configuration file
   let config: Config | undefined;
   try {

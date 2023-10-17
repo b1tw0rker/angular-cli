@@ -11,13 +11,13 @@ import path from 'node:path';
 import { NormalizedApplicationBuildOptions } from '../../builders/application/options';
 import { IndexHtmlGenerator } from '../../utils/index-file/index-html-generator';
 import { InlineCriticalCssProcessor } from '../../utils/index-file/inline-critical-css';
-import { InitialFileRecord } from './bundler-context';
-import type { ExecutionResult } from './bundler-execution-result';
+import { BuildOutputFile, BuildOutputFileType, InitialFileRecord } from './bundler-context';
 
 export async function generateIndexHtml(
   initialFiles: Map<string, InitialFileRecord>,
-  executionResult: ExecutionResult,
+  outputFiles: BuildOutputFile[],
   buildOptions: NormalizedApplicationBuildOptions,
+  lang?: string,
 ): Promise<{
   content: string;
   contentWithoutCriticalCssInlined: string;
@@ -56,11 +56,12 @@ export async function generateIndexHtml(
   }
 
   /** Virtual output path to support reading in-memory files. */
+  const browserOutputFiles = outputFiles.filter(({ type }) => type === BuildOutputFileType.Browser);
   const virtualOutputPath = '/';
   const readAsset = async function (filePath: string): Promise<string> {
     // Remove leading directory separator
     const relativefilePath = path.relative(virtualOutputPath, filePath);
-    const file = executionResult.outputFiles.find((file) => file.path === relativefilePath);
+    const file = browserOutputFiles.find((file) => file.path === relativefilePath);
     if (file) {
       return file.text;
     }
@@ -81,13 +82,14 @@ export async function generateIndexHtml(
       },
     },
     crossOrigin: crossOrigin,
+    deployUrl: buildOptions.publicPath,
   });
 
   indexHtmlGenerator.readAsset = readAsset;
 
   const transformResult = await indexHtmlGenerator.process({
     baseHref,
-    lang: undefined,
+    lang,
     outputPath: virtualOutputPath,
     files: [...initialFiles].map(([file, record]) => ({
       name: record.name ?? '',

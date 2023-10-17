@@ -10,37 +10,30 @@ import { Type } from '@angular/core';
 
 // @public
 export class CommonEngine {
-    constructor(bootstrap?: Type<{}> | (() => Promise<ApplicationRef>) | undefined, providers?: StaticProvider[]);
+    constructor(options?: CommonEngineOptions | undefined);
     render(opts: CommonEngineRenderOptions): Promise<string>;
 }
 
 // @public (undocumented)
+export interface CommonEngineOptions {
+    bootstrap?: Type<{}> | (() => Promise<ApplicationRef>);
+    enablePeformanceProfiler?: boolean;
+    providers?: StaticProvider[];
+}
+
+// @public (undocumented)
 export interface CommonEngineRenderOptions {
-    // (undocumented)
     bootstrap?: Type<{}> | (() => Promise<ApplicationRef>);
     // (undocumented)
     document?: string;
     // (undocumented)
     documentFilePath?: string;
     inlineCriticalCss?: boolean;
-    // (undocumented)
     providers?: StaticProvider[];
     publicPath?: string;
     // (undocumented)
     url?: string;
 }
-
-// @public
-export function ngExpressEngine(setupOptions: Readonly<NgExpressEngineOptions>): (path: string, options: NgExpressEngineRenderOptions, callback: (err?: Error | null, html?: string) => void) => void;
-
-// @public
-export interface NgExpressEngineOptions extends Pick<CommonEngineRenderOptions, 'providers' | 'publicPath' | 'inlineCriticalCss'> {
-    // (undocumented)
-    bootstrap: NonNullable<CommonEngineRenderOptions['bootstrap']>;
-}
-
-// @public (undocumented)
-export type NgExpressEngineRenderOptions = CommonEngineRenderOptions;
 
 // (No @packageDocumentation comment for this package)
 

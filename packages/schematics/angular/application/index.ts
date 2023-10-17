@@ -37,13 +37,6 @@ export default function (options: ApplicationOptions): Rule {
     const { appDir, appRootSelector, componentOptions, folderName, sourceDir } =
       await getAppOptions(host, options);
 
-    if (options.standalone) {
-      context.logger.warn(
-        'Standalone application structure is new and not yet supported by many existing' +
-          ` 'ng add' and 'ng update' integrations with community libraries.`,
-      );
-    }
-
     return chain([
       addAppToWorkspaceFile(options, appDir, folderName),
       options.standalone
@@ -105,6 +98,11 @@ export default function (options: ApplicationOptions): Rule {
         ]),
         MergeStrategy.Overwrite,
       ),
+      options.ssr
+        ? schematic('ssr', {
+            project: options.name,
+          })
+        : noop(),
       options.skipPackageJson ? noop() : addDependenciesToPackageJson(options),
     ]);
   };
@@ -183,20 +181,14 @@ function addAppToWorkspaceFile(
     ];
 
     schematicsWithTests.forEach((type) => {
-      if (!(`@schematics/angular:${type}` in schematics)) {
-        schematics[`@schematics/angular:${type}`] = {};
-      }
-      (schematics[`@schematics/angular:${type}`] as JsonObject).skipTests = true;
+      ((schematics[`@schematics/angular:${type}`] ??= {}) as JsonObject).skipTests = true;
     });
   }
 
-  if (options.standalone) {
+  if (!options.standalone) {
     const schematicsWithStandalone = ['component', 'directive', 'pipe'];
     schematicsWithStandalone.forEach((type) => {
-      if (!(`@schematics/angular:${type}` in schematics)) {
-        schematics[`@schematics/angular:${type}`] = {};
-      }
-      (schematics[`@schematics/angular:${type}`] as JsonObject).standalone = true;
+      ((schematics[`@schematics/angular:${type}`] ??= {}) as JsonObject).standalone = false;
     });
   }
 
@@ -240,12 +232,12 @@ function addAppToWorkspaceFile(
     schematics,
     targets: {
       build: {
-        builder: Builders.Browser,
+        builder: Builders.Application,
         defaultConfiguration: 'production',
         options: {
           outputPath: `dist/${folderName}`,
           index: `${sourceRoot}/index.html`,
-          main: `${sourceRoot}/main.ts`,
+          browser: `${sourceRoot}/main.ts`,
           polyfills: ['zone.js'],
           tsConfig: `${projectRoot}tsconfig.app.json`,
           inlineStyleLanguage,
@@ -259,12 +251,9 @@ function addAppToWorkspaceFile(
             outputHashing: 'all',
           },
           development: {
-            buildOptimizer: false,
             optimization: false,
-            vendorChunk: true,
             extractLicenses: false,
             sourceMap: true,
-            namedChunks: true,
           },
         },
       },
@@ -274,17 +263,17 @@ function addAppToWorkspaceFile(
         options: {},
         configurations: {
           production: {
-            browserTarget: `${options.name}:build:production`,
+            buildTarget: `${options.name}:build:production`,
           },
           development: {
-            browserTarget: `${options.name}:build:development`,
+            buildTarget: `${options.name}:build:development`,
           },
         },
       },
       'extract-i18n': {
         builder: Builders.ExtractI18n,
         options: {
-          browserTarget: `${options.name}:build`,
+          buildTarget: `${options.name}:build`,
         },
       },
       test: options.minimal

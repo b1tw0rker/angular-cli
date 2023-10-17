@@ -6,11 +6,11 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import type { ApplicationRef, StaticProvider, Type } from '@angular/core';
-import type { renderApplication, renderModule, ɵSERVER_CONTEXT } from '@angular/platform-server';
+import type { ApplicationRef, StaticProvider } from '@angular/core';
 import { basename } from 'node:path';
 import { InlineCriticalCssProcessor } from '../index-file/inline-critical-css';
 import { loadEsmModule } from '../load-esm';
+import { MainServerBundleExports } from './main-bundle-exports';
 
 export interface RenderOptions {
   route: string;
@@ -29,20 +29,6 @@ export interface RenderResult {
 
 export type ServerContext = 'app-shell' | 'ssg' | 'ssr';
 
-interface MainServerBundleExports {
-  /** An internal token that allows providing extra information about the server context. */
-  ɵSERVER_CONTEXT: typeof ɵSERVER_CONTEXT;
-
-  /** Render an NgModule application. */
-  renderModule: typeof renderModule;
-
-  /** Method to render a standalone application. */
-  renderApplication: typeof renderApplication;
-
-  /** Standalone application bootstrapping function. */
-  default: (() => Promise<ApplicationRef>) | Type<unknown>;
-}
-
 /**
  * Renders each route in routes and writes them to <outputPath>/<route>/index.html.
  */
@@ -59,12 +45,35 @@ export async function renderPage({
     ɵSERVER_CONTEXT,
     renderModule,
     renderApplication,
+    ɵresetCompiledComponents,
+    ɵConsole,
   } = await loadBundle('./main.server.mjs');
+
+  // Need to clean up GENERATED_COMP_IDS map in `@angular/core`.
+  // Otherwise an incorrect component ID generation collision detected warning will be displayed in development.
+  // See: https://github.com/angular/angular-cli/issues/25924
+  ɵresetCompiledComponents?.();
 
   const platformProviders: StaticProvider[] = [
     {
       provide: ɵSERVER_CONTEXT,
       useValue: serverContext,
+    },
+    {
+      provide: ɵConsole,
+      /** An Angular Console Provider that does not print a set of predefined logs. */
+      useFactory: () => {
+        class Console extends ɵConsole {
+          private readonly ignoredLogs = new Set(['Angular is running in development mode.']);
+          override log(message: string): void {
+            if (!this.ignoredLogs.has(message)) {
+              super.log(message);
+            }
+          }
+        }
+
+        return new Console();
+      },
     },
   ];
 
@@ -107,6 +116,6 @@ export async function renderPage({
 }
 
 function isBootstrapFn(value: unknown): value is () => Promise<ApplicationRef> {
-  // We can differentiate between a module and a bootstrap function by reading `cmp`:
+  // We can differentiate between a module and a bootstrap function by reading compiler-generated `ɵmod` static property:
   return typeof value === 'function' && !('ɵmod' in value);
 }

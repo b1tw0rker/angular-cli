@@ -8,7 +8,7 @@
 
 import type { BuilderContext } from '@angular-devkit/architect';
 import type { json, logging } from '@angular-devkit/core';
-import type { OutputFile } from 'esbuild';
+import type { Plugin } from 'esbuild';
 import { lookup as lookupMimeType } from 'mrmime';
 import assert from 'node:assert';
 import { BinaryLike, createHash } from 'node:crypto';
@@ -17,8 +17,14 @@ import { ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path, { posix } from 'node:path';
 import type { Connect, InlineConfig, ViteDevServer } from 'vite';
+import { BuildOutputFile, BuildOutputFileType } from '../../tools/esbuild/bundler-context';
 import { JavaScriptTransformer } from '../../tools/esbuild/javascript-transformer';
+import { getFeatureSupport, transformSupportedBrowsersToTargets } from '../../tools/esbuild/utils';
+import { createAngularLocaleDataPlugin } from '../../tools/vite/i18n-locale-plugin';
 import { RenderOptions, renderPage } from '../../utils/server-rendering/render-page';
+import { getSupportedBrowsers } from '../../utils/supported-browsers';
+import { getIndexOutputFile } from '../../utils/webpack-browser-config';
+import { buildApplicationInternal } from '../application';
 import { buildEsbuildBrowser } from '../browser-esbuild';
 import { Schema as BrowserBuilderOptions } from '../browser-esbuild/schema';
 import { loadProxyConfiguration } from './load-proxy-config';
@@ -30,6 +36,7 @@ interface OutputFileRecord {
   size: number;
   hash?: Buffer;
   updated: boolean;
+  servable: boolean;
 }
 
 const SSG_MARKER_REGEXP = /ng-server-context=["']\w*\|?ssg\|?\w*["']/;
@@ -43,10 +50,11 @@ export async function* serveWithVite(
   serverOptions: NormalizedDevServerOptions,
   builderName: string,
   context: BuilderContext,
+  plugins?: Plugin[],
 ): AsyncIterableIterator<DevServerBuilderOutput> {
   // Get the browser configuration from the target name.
   const rawBrowserOptions = (await context.getTargetOptions(
-    serverOptions.browserTarget,
+    serverOptions.buildTarget,
   )) as json.JsonObject & BrowserBuilderOptions;
 
   const browserOptions = (await context.validateOptions(
@@ -58,12 +66,49 @@ export async function* serveWithVite(
     } as json.JsonObject & BrowserBuilderOptions,
     builderName,
   )) as json.JsonObject & BrowserBuilderOptions;
+
+  if (browserOptions.prerender) {
+    // Disable prerendering if enabled and force SSR.
+    // This is so instead of prerendering all the routes for every change, the page is "prerendered" when it is requested.
+    browserOptions.ssr = true;
+    browserOptions.prerender = false;
+  }
+
   // Set all packages as external to support Vite's prebundle caching
   browserOptions.externalPackages = serverOptions.cacheOptions.enabled;
 
   if (serverOptions.servePath === undefined && browserOptions.baseHref !== undefined) {
     serverOptions.servePath = browserOptions.baseHref;
   }
+
+  // The development server currently only supports a single locale when localizing.
+  // This matches the behavior of the Webpack-based development server but could be expanded in the future.
+  if (
+    browserOptions.localize === true ||
+    (Array.isArray(browserOptions.localize) && browserOptions.localize.length > 1)
+  ) {
+    context.logger.warn(
+      'Localization (`localize` option) has been disabled. The development server only supports localizing a single locale per build.',
+    );
+    browserOptions.localize = false;
+  } else if (browserOptions.localize) {
+    // When localization is enabled with a single locale, force a flat path to maintain behavior with the existing Webpack-based dev server.
+    browserOptions.forceI18nFlatOutput = true;
+  }
+
+  // Setup the prebundling transformer that will be shared across Vite prebundling requests
+  const prebundleTransformer = new JavaScriptTransformer(
+    // Always enable JIT linking to support applications built with and without AOT.
+    // In a development environment the additional scope information does not
+    // have a negative effect unlike production where final output size is relevant.
+    { sourcemap: true, jit: true },
+    1,
+  );
+
+  // Extract output index from options
+  // TODO: Provide this info from the build results
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const htmlIndexPath = getIndexOutputFile(browserOptions.index as any);
 
   // dynamically import Vite for ESM compatibility
   const { createServer, normalizePath } = await import('vite');
@@ -72,14 +117,25 @@ export async function* serveWithVite(
   let listeningAddress: AddressInfo | undefined;
   const generatedFiles = new Map<string, OutputFileRecord>();
   const assetFiles = new Map<string, string>();
+  const build =
+    builderName === '@angular-devkit/build-angular:application'
+      ? buildApplicationInternal
+      : buildEsbuildBrowser;
+
   // TODO: Switch this to an architect schedule call when infrastructure settings are supported
-  for await (const result of buildEsbuildBrowser(browserOptions, context, {
-    write: false,
-  })) {
+  for await (const result of build(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    browserOptions as any,
+    context,
+    {
+      write: false,
+    },
+    plugins,
+  )) {
     assert(result.outputFiles, 'Builder did not provide result files.');
 
     // Analyze result files for changes
-    analyzeResultFiles(normalizePath, result.outputFiles, generatedFiles);
+    analyzeResultFiles(normalizePath, htmlIndexPath, result.outputFiles, generatedFiles);
 
     assetFiles.clear();
     if (result.assetFiles) {
@@ -91,6 +147,16 @@ export async function* serveWithVite(
     if (server) {
       handleUpdate(generatedFiles, server, serverOptions, context.logger);
     } else {
+      const projectName = context.target?.project;
+      if (!projectName) {
+        throw new Error('The builder requires a target.');
+      }
+
+      const { root = '' } = await context.getProjectMetadata(projectName);
+      const projectRoot = path.join(context.workspaceRoot, root as string);
+      const browsers = getSupportedBrowsers(projectRoot, context.logger);
+      const target = transformSupportedBrowsersToTargets(browsers);
+
       // Setup server and start listening
       const serverConfiguration = await setupServer(
         serverOptions,
@@ -99,6 +165,8 @@ export async function* serveWithVite(
         browserOptions.preserveSymlinks,
         browserOptions.externalDependencies,
         !!browserOptions.ssr,
+        prebundleTransformer,
+        target,
       );
 
       server = await createServer(serverConfiguration);
@@ -114,14 +182,14 @@ export async function* serveWithVite(
     yield { success: true, port: listeningAddress?.port } as unknown as DevServerBuilderOutput;
   }
 
-  if (server) {
-    let deferred: () => void;
-    context.addTeardown(async () => {
-      await server?.close();
-      deferred?.();
-    });
-    await new Promise<void>((resolve) => (deferred = resolve));
-  }
+  // Add cleanup logic via a builder teardown
+  let deferred: () => void;
+  context.addTeardown(async () => {
+    await server?.close();
+    await prebundleTransformer.close();
+    deferred?.();
+  });
+  await new Promise<void>((resolve) => (deferred = resolve));
 }
 
 function handleUpdate(
@@ -145,7 +213,7 @@ function handleUpdate(
     return;
   }
 
-  if (serverOptions.hmr) {
+  if (serverOptions.liveReload || serverOptions.hmr) {
     if (updatedFiles.every((f) => f.endsWith('.css'))) {
       const timestamp = Date.now();
       server.ws.send({
@@ -181,18 +249,28 @@ function handleUpdate(
 
 function analyzeResultFiles(
   normalizePath: (id: string) => string,
-  resultFiles: OutputFile[],
+  htmlIndexPath: string,
+  resultFiles: BuildOutputFile[],
   generatedFiles: Map<string, OutputFileRecord>,
 ) {
   const seen = new Set<string>(['/index.html']);
   for (const file of resultFiles) {
-    const filePath = '/' + normalizePath(file.path);
+    let filePath;
+    if (file.path === htmlIndexPath) {
+      // Convert custom index output path to standard index path for dev-server usage.
+      // This mimics the Webpack dev-server behavior.
+      filePath = '/index.html';
+    } else {
+      filePath = '/' + normalizePath(file.path);
+    }
     seen.add(filePath);
 
     // Skip analysis of sourcemaps
     if (filePath.endsWith('.map')) {
       generatedFiles.set(filePath, {
         contents: file.contents,
+        servable:
+          file.type === BuildOutputFileType.Browser || file.type === BuildOutputFileType.Media,
         size: file.contents.byteLength,
         updated: false,
       });
@@ -222,6 +300,8 @@ function analyzeResultFiles(
       size: file.contents.byteLength,
       hash: fileHash,
       updated: true,
+      servable:
+        file.type === BuildOutputFileType.Browser || file.type === BuildOutputFileType.Media,
     });
   }
 
@@ -241,6 +321,8 @@ export async function setupServer(
   preserveSymlinks: boolean | undefined,
   prebundleExclude: string[] | undefined,
   ssr: boolean,
+  prebundleTransformer: JavaScriptTransformer,
+  target: string[],
 ): Promise<InlineConfig> {
   const proxy = await loadProxyConfiguration(
     serverOptions.workspaceRoot,
@@ -285,6 +367,7 @@ export async function setupServer(
       external: prebundleExclude,
     },
     plugins: [
+      createAngularLocaleDataPlugin(),
       {
         name: 'vite:angular-memory',
         // Ensures plugin hooks run before built-in Vite hooks
@@ -347,7 +430,7 @@ export async function setupServer(
             // dev server sourcemap issues with stylesheets.
             if (extension !== '.js' && extension !== '.html') {
               const outputFile = outputFiles.get(pathname);
-              if (outputFile) {
+              if (outputFile?.servable) {
                 const mimeType = lookupMimeType(extension);
                 if (mimeType) {
                   res.setHeader('Content-Type', mimeType);
@@ -490,25 +573,19 @@ export async function setupServer(
       entries: [],
       // Add an esbuild plugin to run the Angular linker on dependencies
       esbuildOptions: {
+        // Set esbuild supported targets.
+        target,
+        supported: getFeatureSupport(target),
         plugins: [
           {
             name: 'angular-vite-optimize-deps',
             setup(build) {
-              const transformer = new JavaScriptTransformer(
-                // Always enable JIT linking to support applications built with and without AOT.
-                // In a development environment the additional scope information does not
-                // have a negative effect unlike production where final output size is relevant.
-                { sourcemap: !!build.initialOptions.sourcemap, jit: true },
-                1,
-              );
-
               build.onLoad({ filter: /\.[cm]?js$/ }, async (args) => {
                 return {
-                  contents: await transformer.transformFile(args.path),
+                  contents: await prebundleTransformer.transformFile(args.path),
                   loader: 'js',
                 };
               });
-              build.onEnd(() => transformer.close());
             },
           },
         ],

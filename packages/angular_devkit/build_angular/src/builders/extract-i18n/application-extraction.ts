@@ -29,13 +29,14 @@ export async function extractMessages(
 }> {
   const messages: LocalizeMessage[] = [];
 
-  // Setup the build options for the application based on the browserTarget option
+  // Setup the build options for the application based on the buildTarget option
   const buildOptions = (await context.validateOptions(
-    await context.getTargetOptions(options.browserTarget),
+    await context.getTargetOptions(options.buildTarget),
     builderName,
   )) as unknown as ApplicationBuilderInternalOptions;
   buildOptions.optimization = false;
   buildOptions.sourceMap = { scripts: true, vendor: true };
+  buildOptions.localize = false;
 
   let build;
   if (builderName === '@angular-devkit/build-angular:application') {

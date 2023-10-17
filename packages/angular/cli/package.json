@@ -31,12 +31,12 @@
     "ini": "4.1.1",
     "inquirer": "8.2.6",
     "jsonc-parser": "3.2.0",
-    "npm-package-arg": "11.0.0",
+    "npm-package-arg": "11.0.1",
     "npm-pick-manifest": "9.0.0",
     "open": "8.4.2",
     "ora": "5.4.1",
-    "pacote": "17.0.3",
-    "resolve": "1.22.4",
+    "pacote": "17.0.4",
+    "resolve": "1.22.8",
     "semver": "7.5.4",
     "symbol-observable": "4.0.0",
     "yargs": "17.7.2"
@@ -45,6 +45,7 @@
     "migrations": "@schematics/angular/migrations/migration-collection.json",
     "packageGroup": {
       "@angular/cli": "0.0.0-PLACEHOLDER",
+      "@angular/ssr": "0.0.0-PLACEHOLDER",
       "@angular-devkit/architect": "0.0.0-EXPERIMENTAL-PLACEHOLDER",
       "@angular-devkit/build-angular": "0.0.0-PLACEHOLDER",
       "@angular-devkit/build-webpack": "0.0.0-EXPERIMENTAL-PLACEHOLDER",

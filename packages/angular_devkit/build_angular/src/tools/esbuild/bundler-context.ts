@@ -16,7 +16,8 @@ import {
   build,
   context,
 } from 'esbuild';
-import { basename, extname, join, relative } from 'node:path';
+import { basename, dirname, extname, join, relative } from 'node:path';
+import { createOutputFileFromData, createOutputFileFromText } from './utils';
 
 export type BundleContextResult =
   | { errors: Message[]; warnings: Message[] }
@@ -24,7 +25,7 @@ export type BundleContextResult =
       errors: undefined;
       warnings: Message[];
       metafile: Metafile;
-      outputFiles: OutputFile[];
+      outputFiles: BuildOutputFile[];
       initialFiles: Map<string, InitialFileRecord>;
     };
 
@@ -33,6 +34,19 @@ export interface InitialFileRecord {
   name?: string;
   type: 'script' | 'style';
   external?: boolean;
+}
+
+export enum BuildOutputFileType {
+  Browser = 1,
+  Media = 2,
+  Server = 3,
+  Root = 4,
+}
+
+export interface BuildOutputFile extends OutputFile {
+  type: BuildOutputFileType;
+  fullOutputPath: string;
+  clone: () => BuildOutputFile;
 }
 
 /**
@@ -169,8 +183,8 @@ export class BundlerContext {
       outputFile.path = relativeFilePath;
 
       if (entryPoint) {
-        // The first part of the filename is the name of file (e.g., "polyfills" for "polyfills.7S5G3MDY.js")
-        const name = basename(relativeFilePath).split('.', 1)[0];
+        // The first part of the filename is the name of file (e.g., "polyfills" for "polyfills-7S5G3MDY.js")
+        const name = basename(relativeFilePath).replace(/(?:-[\dA-Z]{8})?\.[a-z]{2,3}$/, '');
         // Entry points are only styles or scripts
         const type = extname(relativeFilePath) === '.css' ? 'style' : 'script';
 
@@ -217,8 +231,27 @@ export class BundlerContext {
       }
     }
 
+    const outputFiles = result.outputFiles.map(({ contents, path }) => {
+      let fileType: BuildOutputFileType;
+      if (dirname(path) === 'media') {
+        fileType = BuildOutputFileType.Media;
+      } else {
+        fileType =
+          this.#esbuildOptions?.platform === 'node'
+            ? BuildOutputFileType.Server
+            : BuildOutputFileType.Browser;
+      }
+
+      return createOutputFileFromData(path, contents, fileType);
+    });
+
     // Return the successful build results
-    return { ...result, initialFiles, errors: undefined };
+    return {
+      ...result,
+      outputFiles,
+      initialFiles,
+      errors: undefined,
+    };
   }
 
   /**

@@ -21,22 +21,13 @@
       "description": "The full path for the server entry point to the application, relative to the current workspace."
     },
     "polyfills": {
-      "description": "Polyfills to be included in the build.",
-      "oneOf": [
-        {
-          "type": "array",
-          "description": "A list of polyfills to include in the build. Can be a full path for a file, relative to the current workspace or module specifier. Example: 'zone.js'.",
-          "items": {
-            "type": "string",
-            "uniqueItems": true
-          },
-          "default": []
-        },
-        {
-          "type": "string",
-          "description": "The full path for the polyfills file, relative to the current workspace or a module specifier. Example: 'zone.js'."
-        }
-      ]
+      "description": "A list of polyfills to include in the build. Can be a full path for a file, relative to the current workspace or module specifier. Example: 'zone.js'.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "uniqueItems": true
+      },
+      "default": []
     },
     "tsConfig": {
       "type": "string",
@@ -218,7 +209,7 @@
     },
     "outputPath": {
       "type": "string",
-      "description": "The full path for the new output directory, relative to the current workspace.\nBy default, writes output to a folder named dist/ in the current project."
+      "description": "The full path for the new output directory, relative to the current workspace."
     },
     "aot": {
       "type": "boolean",
@@ -334,6 +325,11 @@
       "description": "Extract all licenses in a separate file.",
       "default": true
     },
+    "namedChunks": {
+      "type": "boolean",
+      "description": "Use file name for lazy loaded chunks.",
+      "default": false
+    },
     "subresourceIntegrity": {
       "type": "boolean",
       "description": "Enables the use of subresource integrity validation.",
@@ -388,7 +384,7 @@
     },
     "statsJson": {
       "type": "boolean",
-      "description": "Generates a 'stats.json' file which can be analyzed using tools such as 'webpack-bundle-analyzer'.",
+      "description": "Generates a 'stats.json' file which can be analyzed with https://esbuild.github.io/analyze/.",
       "default": false
     },
     "budgets": {
@@ -432,19 +428,9 @@
               "type": "string",
               "description": "The path to a file containing routes separated by newlines."
             },
-            "routes": {
-              "type": "array",
-              "description": "The routes to render.",
-              "items": {
-                "minItems": 1,
-                "type": "string",
-                "uniqueItems": true
-              },
-              "default": []
-            },
             "discoverRoutes": {
               "type": "boolean",
-              "description": "Whether the builder should statically discover routes.",
+              "description": "Whether the builder should discover routers using the Angular Router.",
               "default": true
             }
           },
@@ -461,14 +447,8 @@
           "description": "Enable the server bundles to be written to disk."
         },
         {
-          "type": "object",
-          "properties": {
-            "entry": {
-              "type": "string",
-              "description": "The server entry-point that when executed will spawn the web server."
-            }
-          },
-          "additionalProperties": false
+          "type": "string",
+          "description": "The server entry-point that when executed will spawn the web server."
         }
       ]
     },

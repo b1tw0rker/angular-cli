@@ -38,7 +38,7 @@ describeBuilder(buildApplication, APPLICATION_BUILDER_INFO, (harness) => {
           const { result } = await harness.executeOnce();
 
           expect(result?.success).toBe(true);
-          harness.expectFile('dist/main.js').content.toContain('color: indianred');
+          harness.expectFile('dist/browser/main.js').content.toContain('color: indianred');
         });
 
         it('supports Sass inline component styles when set to "sass"', async () => {
@@ -55,7 +55,7 @@ describeBuilder(buildApplication, APPLICATION_BUILDER_INFO, (harness) => {
           const { result } = await harness.executeOnce();
 
           expect(result?.success).toBe(true);
-          harness.expectFile('dist/main.js').content.toContain('color: indianred');
+          harness.expectFile('dist/browser/main.js').content.toContain('color: indianred');
         });
 
         it('supports Less inline component styles when set to "less"', async () => {
@@ -72,10 +72,10 @@ describeBuilder(buildApplication, APPLICATION_BUILDER_INFO, (harness) => {
           const { result } = await harness.executeOnce();
 
           expect(result?.success).toBe(true);
-          harness.expectFile('dist/main.js').content.toContain('color: indianred');
+          harness.expectFile('dist/browser/main.js').content.toContain('color: indianred');
         });
 
-        xit('updates produced stylesheet in watch mode', async () => {
+        it('updates produced stylesheet in watch mode', async () => {
           harness.useTarget('build', {
             ...BASE_OPTIONS,
             inlineStyleLanguage: InlineStyleLanguage.Scss,
@@ -87,8 +87,9 @@ describeBuilder(buildApplication, APPLICATION_BUILDER_INFO, (harness) => {
             content.replace('__STYLE_MARKER__', '$primary: indianred;\\nh1 { color: $primary; }'),
           );
 
+          const builderAbort = new AbortController();
           const buildCount = await harness
-            .execute()
+            .execute({ signal: builderAbort.signal })
             .pipe(
               timeout(30000),
               concatMap(async ({ result }, index) => {
@@ -96,8 +97,10 @@ describeBuilder(buildApplication, APPLICATION_BUILDER_INFO, (harness) => {
 
                 switch (index) {
                   case 0:
-                    harness.expectFile('dist/main.js').content.toContain('color: indianred');
-                    harness.expectFile('dist/main.js').content.not.toContain('color: aqua');
+                    harness
+                      .expectFile('dist/browser/main.js')
+                      .content.toContain('color: indianred');
+                    harness.expectFile('dist/browser/main.js').content.not.toContain('color: aqua');
 
                     await harness.modifyFile('src/app/app.component.ts', (content) =>
                       content.replace(
@@ -107,8 +110,10 @@ describeBuilder(buildApplication, APPLICATION_BUILDER_INFO, (harness) => {
                     );
                     break;
                   case 1:
-                    harness.expectFile('dist/main.js').content.not.toContain('color: indianred');
-                    harness.expectFile('dist/main.js').content.toContain('color: aqua');
+                    harness
+                      .expectFile('dist/browser/main.js')
+                      .content.not.toContain('color: indianred');
+                    harness.expectFile('dist/browser/main.js').content.toContain('color: aqua');
 
                     await harness.modifyFile('src/app/app.component.ts', (content) =>
                       content.replace(
@@ -118,13 +123,17 @@ describeBuilder(buildApplication, APPLICATION_BUILDER_INFO, (harness) => {
                     );
                     break;
                   case 2:
-                    harness.expectFile('dist/main.js').content.not.toContain('color: indianred');
-                    harness.expectFile('dist/main.js').content.not.toContain('color: aqua');
-                    harness.expectFile('dist/main.js').content.toContain('color: blue');
+                    harness
+                      .expectFile('dist/browser/main.js')
+                      .content.not.toContain('color: indianred');
+                    harness.expectFile('dist/browser/main.js').content.not.toContain('color: aqua');
+                    harness.expectFile('dist/browser/main.js').content.toContain('color: blue');
+
+                    // Test complete - abort watch mode
+                    builderAbort.abort();
                     break;
                 }
               }),
-              take(3),
               count(),
             )
             .toPromise();

@@ -28,17 +28,10 @@ export default async function () {
   //   - static #_ = this.ecmp = bla
   const staticIndicatorRegex = /static\s+(\{|#[_\d]+\s+=)/;
 
-  await ng('build', '--configuration=development');
-  await expectFileToExist('dist/test-project/main.js');
-  const mainContent = await readFile('dist/test-project/main.js');
-  // TODO: This default cause can be removed in the future when Safari v15
-  // is longer included in the default browserlist configuration of CLI apps.
-  assert.doesNotMatch(mainContent, staticIndicatorRegex, unexpectedStaticFieldErrorMessage);
-
   await writeFile('.browserslistrc', 'last 1 chrome version');
   await ng('build', '--configuration=development');
-  await expectFileToExist('dist/test-project/main.js');
-  const mainContentChromeLatest = await readFile('dist/test-project/main.js');
+  await expectFileToExist('dist/test-project/browser/main.js');
+  const mainContentChromeLatest = await readFile('dist/test-project/browser/main.js');
 
   assert.match(
     mainContentChromeLatest,
@@ -54,8 +47,8 @@ export default async function () {
   await writeFile('.browserslistrc', 'Safari <=15');
 
   await ng('build', '--configuration=development');
-  await expectFileToExist('dist/test-project/main.js');
-  const mainContentSafari15Explicit = await readFile('dist/test-project/main.js');
+  await expectFileToExist('dist/test-project/browser/main.js');
+  const mainContentSafari15Explicit = await readFile('dist/test-project/browser/main.js');
   assert.doesNotMatch(
     mainContentSafari15Explicit,
     staticIndicatorRegex,

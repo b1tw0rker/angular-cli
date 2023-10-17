@@ -66,7 +66,7 @@ describe('Prerender Builder', () => {
   afterEach(async () => host.restore().toPromise());
 
   it('fails with error when no routes are provided', async () => {
-    const run = await architect.scheduleTarget(target, { routes: [], guessRoutes: false });
+    const run = await architect.scheduleTarget(target, { routes: [], discoverRoutes: false });
     await run.stop();
 
     await expectAsync(run.result).toBeRejectedWith(
@@ -155,10 +155,10 @@ describe('Prerender Builder', () => {
     );
   });
 
-  it('should guess routes to prerender when guessRoutes is set to true.', async () => {
+  it('should guess routes to prerender when discoverRoutes is set to true.', async () => {
     const run = await architect.scheduleTarget(target, {
       routes: [''],
-      guessRoutes: true,
+      discoverRoutes: true,
     });
 
     const output = await run.result;
@@ -210,5 +210,9 @@ describe('Prerender Builder', () => {
     expect(content).toMatch(
       /<style>p{color:#000}<\/style><link rel="stylesheet" href="styles\.\w+\.css" media="print" onload="this\.media='all'">/,
     );
+
+    // Validate that critters does not process already critical css inlined stylesheets.
+    expect(content).not.toContain(`onload="this.media='print'">`);
+    expect(content).not.toContain(`media="print"></noscript>`);
   });
 });

@@ -7,7 +7,8 @@
  */
 
 import { NormalizedApplicationBuildOptions } from '../../builders/application/options';
-import type { SourceFileCache, createCompilerPlugin } from './angular/compiler-plugin';
+import type { createCompilerPlugin } from './angular/compiler-plugin';
+import type { SourceFileCache } from './angular/source-file-cache';
 
 type CreateCompilerPluginParameters = Parameters<typeof createCompilerPlugin>;
 
@@ -63,6 +64,7 @@ export function createCompilerPluginOptions(
       inlineStyleLanguage,
       preserveSymlinks,
       tailwindConfiguration,
+      publicPath: options.publicPath,
     },
   };
 }

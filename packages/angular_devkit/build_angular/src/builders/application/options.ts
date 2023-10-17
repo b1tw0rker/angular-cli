@@ -7,6 +7,7 @@
  */
 
 import { BuilderContext } from '@angular-devkit/architect';
+import type { Plugin } from 'esbuild';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import {
@@ -14,11 +15,12 @@ import {
   normalizeGlobalStyles,
 } from '../../tools/webpack/utils/helpers';
 import { normalizeAssetPatterns, normalizeOptimization, normalizeSourceMaps } from '../../utils';
+import { I18nOptions, createI18nOptions } from '../../utils/i18n-options';
 import { normalizeCacheOptions } from '../../utils/normalize-cache';
 import { generateEntryPoints } from '../../utils/package-chunk-sort';
 import { findTailwindConfigurationFile } from '../../utils/tailwind';
 import { getIndexInputFile, getIndexOutputFile } from '../../utils/webpack-browser-config';
-import { Schema as ApplicationBuilderOptions, OutputHashing } from './schema';
+import { Schema as ApplicationBuilderOptions, I18NTranslation, OutputHashing } from './schema';
 
 export type NormalizedApplicationBuildOptions = Awaited<ReturnType<typeof normalizeOptions>>;
 
@@ -40,6 +42,17 @@ interface InternalOptions {
    * Currently used by the dev-server to support prebundling.
    */
   externalPackages?: boolean;
+
+  /**
+   * Forces the output from the localize post-processing to not create nested directories per locale output.
+   * This is only used by the development server which currently only supports a single locale per build.
+   */
+  forceI18nFlatOutput?: boolean;
+
+  /**
+   * Allows for usage of the deprecated `deployUrl` option with the compatibility builder `browser-esbuild`.
+   */
+  deployUrl?: string;
 }
 
 /** Full set of options for `application` builder. */
@@ -59,6 +72,7 @@ export type ApplicationBuilderInternalOptions = Omit<
  * @param context The context for current builder execution.
  * @param projectName The name of the project for the current execution.
  * @param options An object containing the options to use for the build.
+ * @param plugins An optional array of programmatically supplied build plugins.
  * @returns An object containing normalized options required to perform the build.
  */
 // eslint-disable-next-line max-lines-per-function
@@ -66,6 +80,7 @@ export async function normalizeOptions(
   context: BuilderContext,
   projectName: string,
   options: ApplicationBuilderInternalOptions,
+  plugins?: Plugin[],
 ) {
   const workspaceRoot = context.workspaceRoot;
   const projectMetadata = await context.getProjectMetadata(projectName);
@@ -80,6 +95,16 @@ export async function normalizeOptions(
   const cacheOptions = normalizeCacheOptions(projectMetadata, workspaceRoot);
   cacheOptions.path = path.join(cacheOptions.path, projectName);
 
+  const i18nOptions: I18nOptions & {
+    duplicateTranslationBehavior?: I18NTranslation;
+    missingTranslationBehavior?: I18NTranslation;
+  } = createI18nOptions(projectMetadata, options.localize);
+  i18nOptions.duplicateTranslationBehavior = options.i18nDuplicateTranslation;
+  i18nOptions.missingTranslationBehavior = options.i18nMissingTranslation;
+  if (options.forceI18nFlatOutput) {
+    i18nOptions.flatOutput = true;
+  }
+
   const entryPoints = normalizeEntryPoints(workspaceRoot, options.browser, options.entryPoints);
   const tsconfig = path.join(workspaceRoot, options.tsConfig);
   const outputPath = normalizeDirectoryPath(path.join(workspaceRoot, options.outputPath));
@@ -92,12 +117,12 @@ export async function normalizeOptions(
   const outputNames = {
     bundles:
       options.outputHashing === OutputHashing.All || options.outputHashing === OutputHashing.Bundles
-        ? '[name].[hash]'
+        ? '[name]-[hash]'
         : '[name]',
     media:
       'media/' +
       (options.outputHashing === OutputHashing.All || options.outputHashing === OutputHashing.Media
-        ? '[name].[hash]'
+        ? '[name]-[hash]'
         : '[name]'),
   };
 
@@ -173,15 +198,11 @@ export async function normalizeOptions(
 
   let prerenderOptions;
   if (options.prerender) {
-    const {
-      discoverRoutes = true,
-      routes = [],
-      routesFile = undefined,
-    } = options.prerender === true ? {} : options.prerender;
+    const { discoverRoutes = true, routesFile = undefined } =
+      options.prerender === true ? {} : options.prerender;
 
     prerenderOptions = {
       discoverRoutes,
-      routes,
       routesFile: routesFile && path.join(workspaceRoot, routesFile),
     };
   }
@@ -189,11 +210,9 @@ export async function normalizeOptions(
   let ssrOptions;
   if (options.ssr === true) {
     ssrOptions = {};
-  } else if (typeof options.ssr === 'object') {
-    const { entry } = options.ssr;
-
+  } else if (typeof options.ssr === 'string') {
     ssrOptions = {
-      entry: entry && path.join(workspaceRoot, entry),
+      entry: path.join(workspaceRoot, options.ssr),
     };
   }
 
@@ -226,6 +245,9 @@ export async function normalizeOptions(
     progress = true,
     externalPackages,
     deleteOutputPath,
+    namedChunks,
+    budgets,
+    deployUrl,
   } = options;
 
   // Return all the normalized options
@@ -272,6 +294,11 @@ export async function normalizeOptions(
       typeof serviceWorker === 'string' ? path.join(workspaceRoot, serviceWorker) : undefined,
     indexHtmlOptions,
     tailwindConfiguration,
+    i18nOptions,
+    namedChunks,
+    budgets: budgets?.length ? budgets : undefined,
+    publicPath: deployUrl ? deployUrl : undefined,
+    plugins: plugins?.length ? plugins : undefined,
   };
 }
 

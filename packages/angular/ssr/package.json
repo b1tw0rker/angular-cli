@@ -9,13 +9,20 @@
     "ssr",
     "universal"
   ],
+  "ng-add": {
+    "save": "dependencies"
+  },
   "dependencies": {
     "critters": "0.0.20",
     "tslib": "^2.3.0"
   },
   "peerDependencies": {
-    "@angular/common": "^17.0.0 || ^17.0.0-next.1",
-    "@angular/core": "^17.0.0 || ^17.0.0-next.1"
+    "@angular/common": "^17.0.0 || ^17.0.0-next.0",
+    "@angular/core": "^17.0.0 || ^17.0.0-next.0"
   },
-  "schematics": "./schematics/collection.json"
+  "schematics": "./schematics/collection.json",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/angular/angular-cli.git"
+  }
 }

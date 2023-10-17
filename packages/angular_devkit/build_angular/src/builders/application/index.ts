@@ -7,7 +7,8 @@
  */
 
 import { BuilderContext, BuilderOutput, createBuilder } from '@angular-devkit/architect';
-import type { OutputFile } from 'esbuild';
+import type { Plugin } from 'esbuild';
+import { BuildOutputFile, BuildOutputFileType } from '../../tools/esbuild/bundler-context';
 import { purgeStaleBuildCache } from '../../utils/purge-cache';
 import { assertCompatibleAngularVersion } from '../../utils/version';
 import { runEsBuildBuildAction } from './build-action';
@@ -15,15 +16,19 @@ import { executeBuild } from './execute-build';
 import { ApplicationBuilderInternalOptions, normalizeOptions } from './options';
 import { Schema as ApplicationBuilderOptions } from './schema';
 
+export { ApplicationBuilderOptions };
+
 export async function* buildApplicationInternal(
   options: ApplicationBuilderInternalOptions,
-  context: BuilderContext,
+  // TODO: Integrate abort signal support into builder system
+  context: BuilderContext & { signal?: AbortSignal },
   infrastructureSettings?: {
     write?: boolean;
   },
+  plugins?: Plugin[],
 ): AsyncIterable<
   BuilderOutput & {
-    outputFiles?: OutputFile[];
+    outputFiles?: BuildOutputFile[];
     assetFiles?: { source: string; destination: string }[];
   }
 > {
@@ -41,7 +46,8 @@ export async function* buildApplicationInternal(
     return;
   }
 
-  const normalizedOptions = await normalizeOptions(context, projectName, options);
+  const normalizedOptions = await normalizeOptions(context, projectName, options, plugins);
+
   yield* runEsBuildBuildAction(
     (rebuildState) => executeBuild(normalizedOptions, context, rebuildState),
     {
@@ -55,25 +61,43 @@ export async function* buildApplicationInternal(
       workspaceRoot: normalizedOptions.workspaceRoot,
       progress: normalizedOptions.progress,
       writeToFileSystem: infrastructureSettings?.write,
+      // For app-shell and SSG server files are not required by users.
+      // Omit these when SSR is not enabled.
+      writeToFileSystemFilter:
+        normalizedOptions.ssrOptions && normalizedOptions.serverEntryPoint
+          ? undefined
+          : (file) => file.type !== BuildOutputFileType.Server,
       logger: context.logger,
+      signal: context.signal,
     },
   );
 }
 
+/**
+ * Builds an application using the `application` builder with the provided
+ * options.
+ *
+ * Usage of the `plugins` parameter is NOT supported and may cause unexpected
+ * build output or build failures.
+ *
+ * @experimental Direct usage of this function is considered experimental.
+ *
+ * @param options The options defined by the builder's schema to use.
+ * @param context An Architect builder context instance.
+ * @param plugins An array of plugins to apply to the main code bundling.
+ * @returns The build output results of the build.
+ */
 export function buildApplication(
   options: ApplicationBuilderOptions,
   context: BuilderContext,
+  plugins?: Plugin[],
 ): AsyncIterable<
   BuilderOutput & {
-    outputFiles?: OutputFile[];
+    outputFiles?: BuildOutputFile[];
     assetFiles?: { source: string; destination: string }[];
   }
 > {
-  context.logger.warn(
-    'The application builder is currently in developer preview and is not yet recommended for production use.',
-  );
-
-  return buildApplicationInternal(options, context);
+  return buildApplicationInternal(options, context, undefined, plugins);
 }
 
 export default createBuilder(buildApplication);

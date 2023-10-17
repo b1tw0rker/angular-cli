@@ -50,7 +50,7 @@ describe('@ngtools/webpack transformers', () => {
         import __NG_CLI_RESOURCE__2 from "./app.component.2.css?ngResource";
         import { Component } from '@angular/core';
 
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
             constructor() {
                 this.title = 'app';
             }
@@ -62,6 +62,7 @@ describe('@ngtools/webpack transformers', () => {
                 styles: [__NG_CLI_RESOURCE__1, __NG_CLI_RESOURCE__2]
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input);
@@ -89,9 +90,10 @@ describe('@ngtools/webpack transformers', () => {
 
         const tslib_1 = require("tslib");
         const core_1 = require("@angular/core");
-        let AppComponent = exports.AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
           constructor() { this.title = 'app'; }
         };
+        exports.AppComponent = AppComponent;
         exports.AppComponent = AppComponent = tslib_1.__decorate([
           (0, core_1.Component)({
             selector: 'app-root',
@@ -119,7 +121,7 @@ describe('@ngtools/webpack transformers', () => {
         import { __decorate } from "tslib";
         import __NG_CLI_RESOURCE__0 from "./app.component.svg?ngResource";
         import { Component } from '@angular/core';
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
             constructor() {
                 this.title = 'app';
             }
@@ -130,6 +132,7 @@ describe('@ngtools/webpack transformers', () => {
                 template: __NG_CLI_RESOURCE__0
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input);
@@ -156,7 +159,7 @@ describe('@ngtools/webpack transformers', () => {
         import __NG_CLI_RESOURCE__1 from "./app.component.css?ngResource";
         import { Component } from '@angular/core';
 
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
             constructor() {
                 this.title = 'app';
             }
@@ -168,6 +171,7 @@ describe('@ngtools/webpack transformers', () => {
                 styles: ["a { color: red }", __NG_CLI_RESOURCE__1]
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input);
@@ -194,7 +198,7 @@ describe('@ngtools/webpack transformers', () => {
         import __NG_CLI_RESOURCE__2 from "./app.component.2.css?ngResource";
 
         import { Component } from '@angular/core';
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
             constructor() {
                 this.title = 'app';
             }
@@ -206,6 +210,7 @@ describe('@ngtools/webpack transformers', () => {
                 styles: [__NG_CLI_RESOURCE__1, __NG_CLI_RESOURCE__2]
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input);
@@ -232,7 +237,7 @@ describe('@ngtools/webpack transformers', () => {
         import __NG_CLI_RESOURCE__2 from "./app.component.2.css?ngResource";
         import { Component as NgComponent } from '@angular/core';
 
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
             constructor() {
                 this.title = 'app';
             }
@@ -244,6 +249,7 @@ describe('@ngtools/webpack transformers', () => {
                 styles: [__NG_CLI_RESOURCE__1, __NG_CLI_RESOURCE__2]
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const { program } = createTypescriptContext(input);
@@ -274,7 +280,7 @@ describe('@ngtools/webpack transformers', () => {
         import __NG_CLI_RESOURCE__2 from "./app.component.2.css?ngResource";
 
         import * as ng from '@angular/core';
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
             constructor() {
                 this.title = 'app';
             }
@@ -286,6 +292,46 @@ describe('@ngtools/webpack transformers', () => {
                 styles: [__NG_CLI_RESOURCE__1, __NG_CLI_RESOURCE__2]
             })
         ], AppComponent);
+        export { AppComponent };
+      `;
+
+      const result = transform(input);
+      expect(tags.oneLine`${result}`).toEqual(tags.oneLine`${output}`);
+    });
+
+    it('should replace resources specified as string literals', () => {
+      const input = tags.stripIndent`
+        import { Component } from '@angular/core';
+
+        @Component({
+          selector: 'app-root',
+          templateUrl: './app.component.html',
+          styles: 'h2 {font-size: 10px}',
+          styleUrl: './app.component.css'
+        })
+        export class AppComponent {
+          title = 'app';
+        }
+      `;
+      const output = tags.stripIndent`
+        import { __decorate } from "tslib";
+        import __NG_CLI_RESOURCE__0 from "./app.component.html?ngResource";
+        import __NG_CLI_RESOURCE__1 from "./app.component.css?ngResource";
+        import { Component } from '@angular/core';
+
+        let AppComponent = class AppComponent {
+            constructor() {
+                this.title = 'app';
+            }
+        };
+        AppComponent = __decorate([
+            Component({
+                selector: 'app-root',
+                template: __NG_CLI_RESOURCE__0,
+                styles: ["h2 {font-size: 10px}", __NG_CLI_RESOURCE__1]
+            })
+        ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input);
@@ -318,7 +364,7 @@ describe('@ngtools/webpack transformers', () => {
 
         import { Component } from '@angular/core';
 
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
           constructor() {
             this.obj = [
               {
@@ -336,6 +382,7 @@ describe('@ngtools/webpack transformers', () => {
                 styles: [__NG_CLI_RESOURCE__1]
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input);
@@ -365,7 +412,7 @@ describe('@ngtools/webpack transformers', () => {
         import { __decorate } from "tslib";
         import { Component } from 'foo';
 
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
           constructor() {
             this.obj = [
               {
@@ -383,6 +430,7 @@ describe('@ngtools/webpack transformers', () => {
                 styleUrls: ['./app.component.css']
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input);
@@ -405,7 +453,7 @@ describe('@ngtools/webpack transformers', () => {
       const output = `
         import { __decorate } from "tslib";
         import { Component } from '@angular/core';
-        export let AppComponent = class AppComponent {
+        let AppComponent = class AppComponent {
             constructor() {
                 this.title = 'app';
             }
@@ -417,6 +465,7 @@ describe('@ngtools/webpack transformers', () => {
                 styleUrls: ['./app.component.css', './app.component.2.css']
             })
         ], AppComponent);
+        export { AppComponent };
       `;
 
       const result = transform(input, false);

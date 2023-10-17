@@ -43,7 +43,7 @@ interface ServerBundleExports {
   renderApplication?: typeof renderApplication;
 
   /** Standalone application bootstrapping function. */
-  default?: () => Promise<ApplicationRef>;
+  default?: (() => Promise<ApplicationRef>) | Type<unknown>;
 }
 
 /**
@@ -85,15 +85,7 @@ async function render({
     ? 'index.original.html'
     : indexFile;
   const browserIndexInputPath = path.join(outputPath, indexBaseName);
-  let document = await fs.promises.readFile(browserIndexInputPath, 'utf8');
-
-  if (inlineCriticalCss) {
-    // Workaround for https://github.com/GoogleChromeLabs/critters/issues/64
-    document = document.replace(
-      / media="print" onload="this\.media='.+?'"(?: ngCspMedia=".+")?><noscript><link .+?><\/noscript>/g,
-      '>',
-    );
-  }
+  const document = await fs.promises.readFile(browserIndexInputPath, 'utf8');
 
   const platformProviders: StaticProvider[] = [
     {
@@ -113,19 +105,21 @@ async function render({
       url: route,
       platformProviders,
     });
+  } else {
+    assert(renderModule, `renderModule was not exported from: ${serverBundlePath}.`);
+
+    const moduleClass = bootstrapAppFn || AppServerModule;
+    assert(
+      moduleClass,
+      `Neither an AppServerModule nor a bootstrapping function was exported from: ${serverBundlePath}.`,
+    );
+
+    html = await renderModule(moduleClass, {
+      document,
+      url: route,
+      extraProviders: platformProviders,
+    });
   }
-
-  assert(
-    AppServerModule,
-    `Neither an AppServerModule nor a bootstrapping function was exported from: ${serverBundlePath}.`,
-  );
-  assert(renderModule, `renderModule was not exported from: ${serverBundlePath}.`);
-
-  html = await renderModule(AppServerModule, {
-    document,
-    url: route,
-    extraProviders: platformProviders,
-  });
 
   if (inlineCriticalCss) {
     const inlineCriticalCssProcessor = new InlineCriticalCssProcessor({
@@ -154,7 +148,7 @@ async function render({
 }
 
 function isBootstrapFn(value: unknown): value is () => Promise<ApplicationRef> {
-  // We can differentiate between a module and a bootstrap function by reading `cmp`:
+  // We can differentiate between a module and a bootstrap function by reading compiler-generated `ɵmod` static property:
   return typeof value === 'function' && !('ɵmod' in value);
 }
 

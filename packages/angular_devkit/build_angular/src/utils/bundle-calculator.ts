@@ -6,7 +6,6 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import { StatsAsset, StatsChunk, StatsCompilation } from 'webpack';
 import { Budget, Type } from '../builders/browser/schema';
 import { formatSize } from '../tools/webpack/utils/stats';
 
@@ -15,7 +14,7 @@ interface Size {
   label?: string;
 }
 
-interface Threshold {
+export interface Threshold {
   limit: number;
   type: ThresholdType;
   severity: ThresholdSeverity;
@@ -35,6 +34,23 @@ export interface BudgetCalculatorResult {
   severity: ThresholdSeverity;
   message: string;
   label?: string;
+}
+
+export interface BudgetChunk {
+  files?: string[];
+  names?: string[];
+  initial?: boolean;
+}
+
+export interface BudgetAsset {
+  name: string;
+  size: number;
+  componentStyle?: boolean;
+}
+
+export interface BudgetStats {
+  chunks?: BudgetChunk[];
+  assets?: BudgetAsset[];
 }
 
 export function* calculateThresholds(budget: Budget): IterableIterator<Threshold> {
@@ -102,24 +118,16 @@ export function* calculateThresholds(budget: Budget): IterableIterator<Threshold
 /**
  * Calculates the sizes for bundles in the budget type provided.
  */
-function calculateSizes(budget: Budget, stats: StatsCompilation): Size[] {
-  if (budget.type === Type.AnyComponentStyle) {
-    // Component style size information is not available post-build, this must
-    // be checked mid-build via the `AnyComponentStyleBudgetChecker` plugin.
-    throw new Error(
-      'Can not calculate size of AnyComponentStyle. Use `AnyComponentStyleBudgetChecker` instead.',
-    );
-  }
-
-  type NonComponentStyleBudgetTypes = Exclude<Budget['type'], Type.AnyComponentStyle>;
+function calculateSizes(budget: Budget, stats: BudgetStats): Size[] {
   type CalculatorTypes = {
-    new (budget: Budget, chunks: StatsChunk[], assets: StatsAsset[]): Calculator;
+    new (budget: Budget, chunks: BudgetChunk[], assets: BudgetAsset[]): Calculator;
   };
-  const calculatorMap: Record<NonComponentStyleBudgetTypes, CalculatorTypes> = {
+  const calculatorMap: Record<Budget['type'], CalculatorTypes> = {
     all: AllCalculator,
     allScript: AllScriptCalculator,
     any: AnyCalculator,
     anyScript: AnyScriptCalculator,
+    anyComponentStyle: AnyComponentStyleCalculator,
     bundle: BundleCalculator,
     initial: InitialCalculator,
   };
@@ -141,14 +149,14 @@ function calculateSizes(budget: Budget, stats: StatsCompilation): Size[] {
 abstract class Calculator {
   constructor(
     protected budget: Budget,
-    protected chunks: StatsChunk[],
-    protected assets: StatsAsset[],
+    protected chunks: BudgetChunk[],
+    protected assets: BudgetAsset[],
   ) {}
 
   abstract calculate(): Size[];
 
   /** Calculates the size of the given chunk for the provided build type. */
-  protected calculateChunkSize(chunk: StatsChunk): number {
+  protected calculateChunkSize(chunk: BudgetChunk): number {
     // No differential builds, get the chunk size by summing its assets.
     if (!chunk.files) {
       return 0;
@@ -167,7 +175,7 @@ abstract class Calculator {
       .reduce((l, r) => l + r, 0);
   }
 
-  protected getAssetSize(asset: StatsAsset): number {
+  protected getAssetSize(asset: BudgetAsset): number {
     return asset.size;
   }
 }
@@ -265,6 +273,20 @@ class AnyCalculator extends Calculator {
 }
 
 /**
+ * Any compoonent stylesheet
+ */
+class AnyComponentStyleCalculator extends Calculator {
+  calculate() {
+    return this.assets
+      .filter((asset) => asset.componentStyle)
+      .map((asset) => ({
+        size: this.getAssetSize(asset),
+        label: asset.name,
+      }));
+  }
+}
+
+/**
  * Calculate the bytes given a string value.
  */
 function calculateBytes(input: string, baseline?: string, factor: 1 | -1 = 1): number {
@@ -300,13 +322,16 @@ function calculateBytes(input: string, baseline?: string, factor: 1 | -1 = 1): n
 
 export function* checkBudgets(
   budgets: Budget[],
-  webpackStats: StatsCompilation,
+  stats: BudgetStats,
+  checkComponentStyles?: boolean,
 ): IterableIterator<BudgetCalculatorResult> {
-  // Ignore AnyComponentStyle budgets as these are handled in `AnyComponentStyleBudgetChecker`.
-  const computableBudgets = budgets.filter((budget) => budget.type !== Type.AnyComponentStyle);
+  // Ignore AnyComponentStyle budgets as these are handled in `AnyComponentStyleBudgetChecker` unless requested
+  const computableBudgets = checkComponentStyles
+    ? budgets
+    : budgets.filter((budget) => budget.type !== Type.AnyComponentStyle);
 
   for (const budget of computableBudgets) {
-    const sizes = calculateSizes(budget, webpackStats);
+    const sizes = calculateSizes(budget, stats);
     for (const { size, label } of sizes) {
       yield* checkThresholds(calculateThresholds(budget), size, label);
     }

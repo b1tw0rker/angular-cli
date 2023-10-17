@@ -14,6 +14,7 @@ import { readNgVersion } from '../../utils/version';
 const snapshots = require('../../ng-snapshot/package.json');
 
 export default async function () {
+  const useWebpackBuilder = !getGlobalVariable('argv')['esbuild'];
   const isSnapshotBuild = getGlobalVariable('argv')['ng-snapshots'];
 
   await updateJsonFile('package.json', (packageJson) => {
@@ -36,8 +37,6 @@ export default async function () {
 
   await installWorkspacePackages();
 
-  const browserBaseDir = 'dist/test-project/browser';
-
   // Set configurations for each locale.
   const langTranslations = [
     { lang: 'en-US', translation: 'Hello i18n!' },
@@ -48,16 +47,13 @@ export default async function () {
     const appProject = workspaceJson.projects['test-project'];
     const appArchitect = appProject.architect || appProject.targets;
     const buildOptions = appArchitect['build'].options;
-    const serverOptions = appArchitect['server'].options;
-
-    // Make default builds prod.
-    buildOptions.optimization = true;
-    buildOptions.buildOptimizer = true;
-    buildOptions.aot = true;
 
     // Enable localization for all locales
     buildOptions.localize = true;
-    serverOptions.localize = true;
+    if (useWebpackBuilder) {
+      const serverOptions = appArchitect['server'].options;
+      serverOptions.localize = true;
+    }
 
     // Add locale definitions to the project
     const i18n: Record<string, any> = (appProject.i18n = { locales: {} });
@@ -109,8 +105,12 @@ export default async function () {
   }
 
   // Build each locale and verify the output.
-  await ng('run', 'test-project:app-shell');
+  if (useWebpackBuilder) {
+    await ng('run', 'test-project:app-shell');
+  } else {
+    await ng('build');
+  }
   for (const { lang, translation } of langTranslations) {
-    await expectFileToMatch(`${browserBaseDir}/${lang}/index.html`, translation);
+    await expectFileToMatch(`dist/test-project/browser/${lang}/index.html`, translation);
   }
 }

@@ -5,7 +5,7 @@ import { expectFileToExist, expectFileToMatch, readFile } from '../../utils/fs';
 import { noSilentNg } from '../../utils/process';
 
 function verifySize(bundle: string, baselineBytes: number) {
-  const size = statSync(`dist/test-project/${bundle}`).size;
+  const size = statSync(`dist/test-project/browser/${bundle}`).size;
   const percentageBaseline = (baselineBytes * 10) / 100;
   const maxSize = baselineBytes + percentageBaseline;
   const minSize = baselineBytes - percentageBaseline;
@@ -24,26 +24,26 @@ function verifySize(bundle: string, baselineBytes: number) {
 }
 
 export default async function () {
-  // Can't use the `ng` helper because somewhere the environment gets
-  // stuck to the first build done
-  const bootstrapRegExp = /bootstrapModule\([\$_a-zA-Z]+[0-9]*\)\./;
-
   await noSilentNg('build');
   await expectFileToExist(join(process.cwd(), 'dist'));
   // Check for cache busting hash script src
-  await expectFileToMatch('dist/test-project/index.html', /main\.[0-9a-zA-Z]{8,16}\.js/);
-  await expectFileToMatch('dist/test-project/index.html', /styles\.[0-9a-zA-Z]{8,16}\.css/);
-  if (!getGlobalVariable('argv')['esbuild']) {
-    // EXPERIMENTAL_ESBUILD: esbuild does not yet extract license text
+  if (getGlobalVariable('argv')['esbuild']) {
+    // esbuild uses an 8 character hash and a dash as separator
+    await expectFileToMatch('dist/test-project/browser/index.html', /main-[0-9a-zA-Z]{8}\.js/);
+    await expectFileToMatch('dist/test-project/browser/index.html', /styles-[0-9a-zA-Z]{8}\.css/);
     await expectFileToMatch('dist/test-project/3rdpartylicenses.txt', /MIT/);
+  } else {
+    await expectFileToMatch('dist/test-project/browser/index.html', /main\.[0-9a-zA-Z]{16}\.js/);
+    await expectFileToMatch('dist/test-project/browser/index.html', /styles\.[0-9a-zA-Z]{16}\.css/);
+    await expectFileToMatch('dist/test-project/browser/3rdpartylicenses.txt', /MIT/);
   }
 
-  const indexContent = await readFile('dist/test-project/index.html');
-  const mainPath = indexContent.match(/src="(main\.[0-9a-zA-Z]{0,32}\.js)"/)![1];
-
-  // Content checks
-  await expectFileToMatch(`dist/test-project/${mainPath}`, bootstrapRegExp);
+  const indexContent = await readFile('dist/test-project/browser/index.html');
+  const mainSrcRegExp = getGlobalVariable('argv')['esbuild']
+    ? /src="(main-[0-9a-zA-Z]{8}\.js)"/
+    : /src="(main\.[0-9a-zA-Z]{16}\.js)"/;
+  const mainPath = indexContent.match(mainSrcRegExp)![1];
 
   // Size checks in bytes
-  verifySize(mainPath, 124000);
+  verifySize(mainPath, 210000);
 }

@@ -1,13 +1,14 @@
 import { getGlobalVariable } from '../../utils/env';
 import { appendToFile, createDir, expectFileToMatch, writeFile } from '../../utils/fs';
 import { installWorkspacePackages } from '../../utils/packages';
-import { silentNg } from '../../utils/process';
+import { ng, silentNg } from '../../utils/process';
 import { updateJsonFile } from '../../utils/project';
 import { readNgVersion } from '../../utils/version';
 
 const snapshots = require('../../ng-snapshot/package.json');
 
 export default async function () {
+  const useWebpackBuilder = !getGlobalVariable('argv')['esbuild'];
   const isSnapshotBuild = getGlobalVariable('argv')['ng-snapshots'];
 
   await updateJsonFile('package.json', (packageJson) => {
@@ -34,8 +35,6 @@ export default async function () {
 
   await installWorkspacePackages();
 
-  const browserBaseDir = 'dist/test-project/browser';
-
   // Set configurations for each locale.
   const langTranslations = [
     { lang: 'en-US', translation: 'Hello i18n!' },
@@ -46,13 +45,14 @@ export default async function () {
     const appProject = workspaceJson.projects['test-project'];
     const appArchitect = appProject.architect;
     const buildOptions = appArchitect['build'].options;
-    const serverOptions = appArchitect['server'].options;
 
     // Enable localization for all locales
     buildOptions.localize = true;
-    buildOptions.outputHashing = 'none';
-    serverOptions.localize = true;
-    serverOptions.outputHashing = 'none';
+    if (useWebpackBuilder) {
+      const serverOptions = appArchitect['server'].options;
+      serverOptions.localize = true;
+      serverOptions.outputHashing = 'none';
+    }
 
     // Add locale definitions to the project
     const i18n: Record<string, any> = (appProject.i18n = { locales: {} });
@@ -80,11 +80,16 @@ export default async function () {
   }
 
   // Build each locale and verify the SW output.
-  await silentNg('run', 'test-project:app-shell:development');
+  if (useWebpackBuilder) {
+    await ng('run', 'test-project:app-shell:development');
+  } else {
+    await ng('build', '--output-hashing=none');
+  }
+
   for (const { lang } of langTranslations) {
     await Promise.all([
-      expectFileToMatch(`${browserBaseDir}/${lang}/ngsw.json`, `/${lang}/main.js`),
-      expectFileToMatch(`${browserBaseDir}/${lang}/ngsw.json`, `/${lang}/index.html`),
+      expectFileToMatch(`dist/test-project/browser/${lang}/ngsw.json`, `/${lang}/main.js`),
+      expectFileToMatch(`dist/test-project/browser/${lang}/ngsw.json`, `/${lang}/index.html`),
     ]);
   }
 }

@@ -10,22 +10,10 @@ import { BuilderContext } from '@angular-devkit/architect';
 import { Schema as BrowserBuilderOptions } from './schema';
 
 const UNSUPPORTED_OPTIONS: Array<keyof BrowserBuilderOptions> = [
-  'budgets',
-
-  // * i18n support
-  'localize',
-  // The following two have no effect when localize is not enabled
-  // 'i18nDuplicateTranslation',
-  // 'i18nMissingTranslation',
-
-  // * Deprecated
-  'deployUrl',
-
   // * Always enabled with esbuild
   // 'commonChunk',
 
   // * Unused by builder and will be removed in a future release
-  'namedChunks',
   'vendorChunk',
   'resourcesOutputPath',
 
@@ -33,11 +21,13 @@ const UNSUPPORTED_OPTIONS: Array<keyof BrowserBuilderOptions> = [
   'webWorkerTsConfig',
 ];
 
-export function logBuilderStatusWarnings(options: BrowserBuilderOptions, context: BuilderContext) {
-  context.logger.warn(
-    `The esbuild-based browser application builder ('browser-esbuild') is currently in developer preview` +
-      ' and is not yet recommended for production use.' +
-      ' For additional information, please see https://angular.io/guide/esbuild',
+export function logBuilderStatusWarnings(
+  options: BrowserBuilderOptions,
+  { logger }: BuilderContext,
+) {
+  logger.warn(
+    `The 'browser-esbuild' builder is a compatibility builder which will be removed in a future major ` +
+      `version in favor of the 'application' builder.`,
   );
 
   // Validate supported options
@@ -55,17 +45,16 @@ export function logBuilderStatusWarnings(options: BrowserBuilderOptions, context
     }
 
     if (
-      unsupportedOption === 'namedChunks' ||
       unsupportedOption === 'vendorChunk' ||
       unsupportedOption === 'resourcesOutputPath' ||
       unsupportedOption === 'deployUrl'
     ) {
-      context.logger.warn(
+      logger.warn(
         `The '${unsupportedOption}' option is not used by this builder and will be ignored.`,
       );
       continue;
     }
 
-    context.logger.warn(`The '${unsupportedOption}' option is not yet supported by this builder.`);
+    logger.warn(`The '${unsupportedOption}' option is not yet supported by this builder.`);
   }
 }

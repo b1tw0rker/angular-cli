@@ -15,6 +15,7 @@ import {
   createAngularCompilerHost,
   ensureSourceFileVersions,
 } from '../angular-host';
+import { createWorkerTransformer } from '../web-worker-transformer';
 import { AngularCompilation, EmitFileResult } from './angular-compilation';
 
 // Temporary deep import for transformer support
@@ -28,6 +29,7 @@ class AngularCompilationState {
     public readonly typeScriptProgram: ts.EmitAndSemanticDiagnosticsBuilderProgram,
     public readonly affectedFiles: ReadonlySet<ts.SourceFile>,
     public readonly templateDiagnosticsOptimization: ng.OptimizeFor,
+    public readonly webWorkerTransform: ts.TransformerFactory<ts.SourceFile>,
     public readonly diagnosticCache = new WeakMap<ts.SourceFile, ts.Diagnostic[]>(),
   ) {}
 
@@ -76,7 +78,7 @@ export class AotCompilation extends AngularCompilation {
     let usingBuildInfo = false;
     if (!oldProgram) {
       oldProgram = ts.readBuilderProgram(compilerOptions, host);
-      usingBuildInfo = true;
+      usingBuildInfo = !!oldProgram;
     }
 
     const typeScriptProgram = ts.createEmitAndSemanticDiagnosticsBuilderProgram(
@@ -91,22 +93,34 @@ export class AotCompilation extends AngularCompilation {
       findAffectedFiles(typeScriptProgram, angularCompiler, usingBuildInfo),
     );
 
+    // Get all files referenced in the TypeScript/Angular program including component resources
+    const referencedFiles = typeScriptProgram
+      .getSourceFiles()
+      .filter((sourceFile) => !angularCompiler.ignoreForEmit.has(sourceFile))
+      .flatMap((sourceFile) => {
+        const resourceDependencies = angularCompiler.getResourceDependencies(sourceFile);
+
+        // Also invalidate Angular diagnostics for a source file if component resources are modified
+        if (this.#state && hostOptions.modifiedFiles?.size) {
+          for (const resourceDependency of resourceDependencies) {
+            if (hostOptions.modifiedFiles.has(resourceDependency)) {
+              this.#state.diagnosticCache.delete(sourceFile);
+            }
+          }
+        }
+
+        return [sourceFile.fileName, ...resourceDependencies];
+      });
+
     this.#state = new AngularCompilationState(
       angularProgram,
       host,
       typeScriptProgram,
       affectedFiles,
       affectedFiles.size === 1 ? OptimizeFor.SingleFile : OptimizeFor.WholeProgram,
+      createWorkerTransformer(hostOptions.processWebWorker.bind(hostOptions)),
       this.#state?.diagnosticCache,
     );
-
-    const referencedFiles = typeScriptProgram
-      .getSourceFiles()
-      .filter((sourceFile) => !angularCompiler.ignoreForEmit.has(sourceFile))
-      .flatMap((sourceFile) => [
-        sourceFile.fileName,
-        ...angularCompiler.getResourceDependencies(sourceFile),
-      ]);
 
     return { affectedFiles, compilerOptions, referencedFiles };
   }
@@ -172,7 +186,7 @@ export class AotCompilation extends AngularCompilation {
 
   emitAffectedFiles(): Iterable<EmitFileResult> {
     assert(this.#state, 'Angular compilation must be initialized prior to emitting files.');
-    const { angularCompiler, compilerHost, typeScriptProgram } = this.#state;
+    const { angularCompiler, compilerHost, typeScriptProgram, webWorkerTransform } = this.#state;
     const buildInfoFilename =
       typeScriptProgram.getCompilerOptions().tsBuildInfoFile ?? '.tsbuildinfo';
 
@@ -186,7 +200,7 @@ export class AotCompilation extends AngularCompilation {
       }
 
       assert(sourceFiles?.length === 1, 'Invalid TypeScript program emit for ' + filename);
-      const sourceFile = sourceFiles[0];
+      const sourceFile = ts.getOriginalNode(sourceFiles[0], ts.isSourceFile);
       if (angularCompiler.ignoreForEmit.has(sourceFile)) {
         return;
       }
@@ -195,7 +209,10 @@ export class AotCompilation extends AngularCompilation {
       emittedFiles.set(sourceFile, { filename: sourceFile.fileName, contents });
     };
     const transformers = mergeTransformers(angularCompiler.prepareEmit().transformers, {
-      before: [replaceBootstrap(() => typeScriptProgram.getProgram().getTypeChecker())],
+      before: [
+        replaceBootstrap(() => typeScriptProgram.getProgram().getTypeChecker()),
+        webWorkerTransform,
+      ],
     });
 
     // TypeScript will loop until there are no more affected files in the program

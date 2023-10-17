@@ -69,7 +69,7 @@ yarn_install(
     data = [
         "//:.yarn/releases/yarn-1.22.17.cjs",
         "//:.yarnrc",
-        "//:tools/postinstall/patches/@angular+bazel+16.0.0-next.6.patch",
+        "//:tools/postinstall/patches/@angular+bazel+17.0.0-next.1.patch",
         "//:tools/postinstall/patches/@bazel+concatjs+5.8.1.patch",
     ],
     # Currently disabled due to:
@@ -86,9 +86,9 @@ yarn_install(
 
 http_archive(
     name = "aspect_bazel_lib",
-    sha256 = "44f4f6d1ea1fc5a79ed6ca83f875038fee0a0c47db4f9c9beed097e56f8fad03",
-    strip_prefix = "bazel-lib-1.34.0",
-    url = "https://github.com/aspect-build/bazel-lib/archive/v1.34.0.tar.gz",
+    sha256 = "9a51150a25ba13e0301b47bbe731aef537330dcc222dc598ebdfe18d2efe2f33",
+    strip_prefix = "bazel-lib-1.34.5",
+    url = "https://github.com/aspect-build/bazel-lib/archive/v1.34.5.tar.gz",
 )
 
 load("@aspect_bazel_lib//lib:repositories.bzl", "aspect_bazel_lib_dependencies", "register_jq_toolchains")
